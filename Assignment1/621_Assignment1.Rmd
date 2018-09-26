@@ -1,0 +1,486 @@
+---
+title: "621 Assignment1"
+author: "Raghu"
+date: "Sep 15, 2018"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+\pagebreak
+
+
+# Introduction
+
+  In this assignment, I will explore, analyze and model a data set containing approximately 2200 records. Each record represents a professional baseball team from the years 1871 to 2006 inclusive. Each record has the performance of the team for the given year, with all of the statistics adjusted to match the performance of a 162 game season. 
+
+  The objective is to build a multiple linear regression model on the training data to predict the number of wins for the team. I can only use the variables given to me (or variables that I derive from the variables provided).
+
+
+# 1. Data Exploration
+
+
+```{r p1}
+shhh <- suppressPackageStartupMessages
+shhh(library(tidyverse))
+shhh(library(knitr))
+shhh(library(psych))
+shhh(library(readr))
+shhh(library(kableExtra))
+shhh(library(ggiraph))
+shhh(library(ggcorrplot))
+shhh(library(reshape2))
+shhh(library(RColorBrewer))
+shhh(library(ggfortify))
+shhh(library(MASS))
+shhh(library(pls))
+shhh(library(caret))
+shhh(library(car))
+shhh(library(gridExtra))
+shhh(library(corrgram))
+
+mb_tr_data <- read_csv("https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment1/moneyball-training-data.csv")
+
+mbeval <- read_csv("https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment1/moneyball-evaluation-data.csv")
+```
+
+\pagebreak
+
+Print first 5 rows of the training data set.
+```{r p1.1}
+
+#print first 5 rows
+print(head(mb_tr_data,5))
+#knitr::kable(head(mb_tr_data))
+#kable(cbind(head(mb_tr_data), head(mb_tr_data))) %>%
+#  kable_styling() %>%
+#  scroll_box(width = "100%", height = "200px")
+
+cleanNames <- function(sn) {
+    name_list <- names(sn)
+    name_list <- gsub("TEAM_", "", name_list)
+    names(sn) <- name_list
+    sn
+}
+
+mb_tr_data <- cleanNames(mb_tr_data)
+mbeval <- cleanNames(mbeval)
+
+```
+
+
+Columns in the data set after removing TEAM_
+
+```{r p1.2}
+#Columns in the data set
+names(mb_tr_data)
+# ADD A DUMMY COLUMN TO EVAL DATA FOR TARGET WINS
+mbeval$TARGET_WINS <- 0
+
+#dimensions
+dim(mb_tr_data)
+
+```
+
+## Summary
+
+  Of the 17 columns, INDEX is simply an index value used for sorting while TARGET_WINS represents the response variable we are to use within our regression models. The remaining 15 elements are all potential predictor variables for our linear models. A summary table for the data set is provided below. All variables are numbers and none of them are categorical. TARGET_WINS is not existing in the test data set which need to be added and predicted.
+
+### Descriptive statistics
+
+```{r P2}
+##descriptive statistics
+describe(mb_tr_data)
+
+```
+
+\pagebreak
+
+### Summary of data
+
+```{r P2.1}
+##summary of data
+summary(mb_tr_data)
+```
+
+
+```{r P2.2}
+#checking for outliers using boxplot
+ggplot(stack(mb_tr_data), aes(x = ind, y = values)) + 
+  ggtitle("BoxPlot Predictor Comparison") +
+  geom_boxplot() +
+  coord_cartesian(ylim = c(0, 5000)) +
+  theme(legend.position="none") +
+  theme(axis.text.x=element_text(angle=45, hjust=1)) + 
+  theme(panel.background = element_rect(fill = 'grey'))
+```
+the boxplots of all the variables in the data set give an idea of how the data is spread.
+
+
+\pagebreak
+
+### Checking for Skewness
+
+```{r P2.3}
+#checking for skewness
+mb_tr_ds = melt(mb_tr_data)
+ggplot(mb_tr_ds, aes(x= value)) + 
+  ggtitle("Check for Skewness") + 
+    geom_density(fill='red') + facet_wrap(~variable, scales = 'free') 
+
+#scatter plot
+d <- melt(mb_tr_data, id.vars="TARGET_WINS")
+
+# Everything on the same plot
+ggplot(d, aes(TARGET_WINS,value, col=variable)) + 
+  geom_point() + 
+#  stat_smooth() +
+  facet_wrap(~variable)
+
+```
+
+The plot on the other hand provides visulatization of each of the independent variables to determine the skewness. scatterplot displays TARGET_WINS vs each of the predictor variables. we can see some outliers on PITCHING_SO and PITCHING_H has strong variations. 
+
+
+\pagebreak
+
+### Checking for NAs
+
+```{r P2.4}
+
+## check for NAs 
+colSums(is.na(mb_tr_data))
+
+```
+
+
+
+ Based on the plots, several outliers and skewness is observed. BATTING_HBP has the highest NAs. BASERUN_CS is the second largest. FIELDING_DP is the 3rd largest.
+
+\pagebreak
+
+## Correlation Plot
+
+  Using the cor function across the data frame we notice some strong correlations. BATTING_H obviously has  some colinearity with BATTING_2B, BATTING_3B and BATTING_HR as these values are a subset of hits. BATTING_3B and PITCHING_BB have strong correlation, as do PITCHING_HR and BATTING_HR. Since we are focusing on wins, the following table shows the correlation when the NA's are omitted:
+There are positive and negative correlation observed.
+
+ There are missing data, severe outliers, and collinearity observed based on the data exploration.
+  
+
+```{r P3}
+
+#correlation matrix
+mb_tr_data <- mb_tr_data[,2:17]
+# ADD A DUMMY COLUMN TO EVAL DATA FOR TARGET WINS
+mbeval$TARGET_WINS <- 0
+
+M <- cor_pmat(mb_tr_data,method = "pearson", use = "complete.obs")
+#M
+#corrplot(M, method = "circle" , title = "Correlation Plot")
+#cormat<-cor(mb_tr_data, method = "pearson", use = "complete.obs")
+#cormat <- cor(mb_tr_data$TARGET_WINS , mb_tr_data,method = "pearson", use = "complete.obs")
+#cormat
+ggcorrplot(M, method = "circle")
+
+
+```
+
+  
+
+\pagebreak
+
+# 2. Data Preparation
+
+  As we can see from summary statistics and plots, we have a number of missing values. The first step is to take care of missing values. We'll use Median imputation for CS, SB, and DP. Since HBP has the maximum missing values, we will remove that entirely. Interestingly, Pitching and Batting SO are missing in the same observations(see section Checking for NAs). I see that no problem with the residuals before transformation. qq is linear. 
+
+I will also create one new variable:
+BATTING_1B = BATTING_H - BATTING_HR - BATTING_3B -BATTING_2B
+Once its created, will remove BATTING_H from the model.
+
+### Linear Model before transformation.
+
+By looking at the linear model before tranformation, FIELDING_E and FIELDING_DP are only significant out of all the variables. R-squared is less. need to compare it after the transformation and with other modals to see how significantly the modal can be improved.
+
+```{r P4}
+
+ws <- lm(data=mb_tr_data, TARGET_WINS~.)
+summary(ws)
+autoplot(ws)
+```
+
+\pagebreak
+
+### Detect multicollinearity
+
+```{r P4.01}
+round(vif(ws),2)
+```
+
+we can see that 8 of the variables has high values due to collinearity.
+
+```{r P4.1}
+m_CS <- round(median(mb_tr_data$BASERUN_CS, na.rm=T))
+m_SB <- round(median(mb_tr_data$BASERUN_CS, na.rm=T))
+m_DP <- round(median(mb_tr_data$FIELDING_DP, na.rm=T))
+
+Transform <- function(df, imputeMethod, scale=F) {
+    
+## NA Management
+df[['BASERUN_CS']][is.na(df[['BASERUN_CS']])] <- m_CS
+df[['BASERUN_SB']][is.na(df[['BASERUN_SB']])] <- m_SB
+df[['FIELDING_DP']][is.na(df[['FIELDING_DP']])] <-m_DP
+
+#mutation
+df <- df %>%
+        mutate(BATTING_1B = BATTING_H - BATTING_HR - BATTING_3B - BATTING_2B) %>%
+        dplyr::select(-BATTING_H, -BATTING_HBP)
+    
+return(df)
+}
+
+
+train2 <- Transform(mb_tr_data)
+test <- Transform(mbeval)
+
+# Cleaning
+
+train2 <- train2[complete.cases(train2), ] 
+test <- test[complete.cases(test), ] 
+rownames(train2) <- NULL
+```
+
+\pagebreak
+
+### Correlation Plot after transformation.
+
+```{r P4.2}
+shhh(require(corrplot))
+#train2 <- as.matrix(train2)
+M <- cor(train2, use = "na.or.complete")
+corrplot(M, method = "pie" )
+
+#corrgram(M, order=TRUE,
+#         main="MoneyBall ",
+#         lower.panel=panel.shade, upper.panel=panel.pie,
+#         diag.panel=panel.minmax, text.panel=panel.txt)
+#corrgram(M, order=TRUE,
+#         upper.panel=panel.cor, main="Moneyball")
+#corrplot(M, method="circle", type="upper", order="AOE", tl.cex = .4,
+#         col = brewer.pal(n = 8, name = "RdYlBu"))
+```
+
+\pagebreak
+
+### Box Plot after transformation.
+```{r P4.3}
+
+#boxplot of training data set after removing NAs and ading a column.
+boxplot(M, xlab="Boxplot Predictor Comparison") 
+
+
+# handle train instances with NAs we did not remove from model
+#test$BATTING_SO[is.na(test$BATTING_SO)] <- median(train2$BATTING_SO)
+#test$PITCHING_SO[is.na(test$PITCHING_SO)] <- median(train2$PITCHING_SO)
+
+
+
+```
+
+  
+
+After transformation, box plot appears to be much better and normally distributed with outliers removed. correlation looks better after removing some of the correlations. 
+
+\pagebreak
+
+# 3. Build Models
+
+## Model1: Full Modal
+
+In this Modal, I will not exclude any explanatory variables and evaluate the metrics.
+
+```{r M1}
+
+model1 <- lm( data = train2, TARGET_WINS ~.)
+summary(model1)
+autoplot(model1)
+
+```
+
+### Summary:
+
+Full modal includes all explanatory variables. our goal is to assess whether full modal is the best modal. If not, we want to identify a smaller modal that is preferable. 
+Residuals plot is more dense after transformation of data. R-squared has reduced a lot after transformation. no change in the p-value. 7 of the variables are highly significant but the t-value is high. so, removing some of the variables is an option to check if it improves the modal.
+
+
+\pagebreak
+
+### Detect multicollinearity
+```{r M1.01}
+round(vif(model1),2)
+```
+
+
+
+  we can see that multicollinearity has significantly reduced after transformation.
+
+\pagebreak
+
+## Model2: Stepwise Regression
+
+  In stepwise, i have chosen direction as both that includes forward and backward selection. 
+
+  The backward-elimination strategy starts with the model that includes all potential predictor variables. Variables are eliminated one-at-a-time from the model until only variables with statistically significant p-values remain.
+
+The forward-selection strategy is the reverse of the backward-elimination technique. Instead of eliminating variables one-at-a-time, we add variables one-at-a-time until we cannot find any variables the present strong evidence of thier importance in the model. 
+
+```{r M2}
+
+# Fit the full model 
+m2 <- lm( data = train2, TARGET_WINS ~.)
+# Stepwise regression model
+model2 <- stepAIC(m2, direction = "both", 
+                      trace = FALSE)
+summary(model2)
+#autoplot(model2, title = ("Stepwise Regression Model"))
+autoplot(model2) 
+
+
+```
+
+### Summary:
+
+  I dont see any difference between stepwise and full model interms of residual plots but F-stat has increased significantly from 70.72 to 89.92. R-squared and p-value is almost the same. there are only 11 coefficients displayed in stepwise model but all are statistically significant.
+
+\pagebreak
+
+## Model3:  Principal Component Regression (PCR)
+
+I will next evaluate the PCR model.
+
+```{r M3}
+
+model3 <- train(
+  TARGET_WINS~., data = train2, method = "pcr",
+  scale = TRUE,
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+  )
+```
+
+
+### Model summary \newline
+
+```{r M3.1}
+summary(model3)
+```
+
+
+### Model Results \newline
+
+```{r M3.2}
+model3$results
+```
+
+### Model Plot \newline
+
+```{r M3.3}
+# Plot model RMSE vs different values of components
+plot(model3)
+# Print the best tuning parameter ncomp that
+# minimize the cross-validation error, RMSE
+model3$bestTune
+```
+
+### Summary:
+
+  Caret uses cross-validation to automatically identify the optimal number of principal components (ncomp) to be incorporated in the model.
+
+Here, we'll test 10 different values of the tuning parameter ncomp. This is specified using the option tuneLength. The optimal number of principal components is selected so that the cross-validation error (RMSE) is minimized. RMSE is ranging from 13.0 to 15.6
+
+
+\pagebreak
+
+## Model4: Partial Least Squares Regression (PLS)
+
+  Partial least squares regression extends multiple linear regression without imposing the restrictions employed by discriminant analysis, principal components regression, and canonical correlation.
+  
+  Partial least squares regression can be used as an exploratory analysis tool to select suitable predictor variables and to identify outliers before classical linear regression.
+  
+  Principal components regression and partial least squares regression differ in the methods used in extracting factor scores. 
+
+```{r M4}
+
+model4 <- train(
+  TARGET_WINS~., data = train2, method = "pls",
+  scale = TRUE,
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+  )
+```
+
+### Model summary \newline
+
+```{r M4.1}
+summary(model4)
+```
+
+
+### Model Results \newline
+
+```{r M4.2}
+
+model4$results
+# Plot model RMSE vs different values of components
+```
+
+
+### Model Plot 
+```{r M4.3}
+plot(model4)
+# Print the best tuning parameter ncomp that
+# minimize the cross-validation error, RMSE
+model4$bestTune
+
+```
+
+### Summary:
+
+  The optimal number of principal components included in the PLS model is 5 or sometimes 4. This captures 90% of the variation in the predictors and 75% of the variation in the outcome variable.
+
+  In our example, the cross-validation error RMSE obtained with the PLS model is lower than the RMSE obtained using the PCR method. RMSE is ranging from 13.05 to 13.89.  So, the PLS model is the best model, for explaining our data, compared to the PCR model.
+
+
+\pagebreak
+
+# 4. Select Model
+
+### Conclusion:
+   By analyzing the R-squared, F-statistic and RMSE, PLS model seems to be good as
+the number of principal components is 5 and RMSE is lower than the other model.
+I will predict the test data using PLS model.
+
+```{r S1}
+# Make predictions
+predictions <- model4 %>% predict(test)
+summary(predictions)
+pred_df <- data.frame(predictions)
+# Model performance metrics
+  RMSE = RMSE(predictions, test$medv)
+  #Rsquare = R2(predictions, test$medv)
+  #predictions$results 
+  
+p1 <- ggplot(train2, aes(TARGET_WINS)) + geom_histogram() + ggtitle("Training Win Distribution") 
+p2 <- ggplot(pred_df, aes(predictions)) + geom_histogram() + ggtitle("Predicted Win Distribution")
+
+grid.arrange(p1, p2, ncol=2)
+
+```
+
+The plots shows training distribution and predicted distribution. comparing the 2 plots, distribution of the predicted values seems to be more aligned with the test distribution.
+
