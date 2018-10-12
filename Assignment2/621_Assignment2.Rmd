@@ -1,0 +1,233 @@
+---
+title: "621 Assignment2 - Classification Metrics"
+author: "Raghu"
+date: "Oct 3, 2018"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+\pagebreak
+
+```{r p0}
+
+if (!require('knitr')) (install.packages('knitr'))
+if (!require('ggplot2')) (install.packages('ggplot2'))
+if (!require('caret')) (install.packages('caret'))
+if (!require('pROC')) (install.packages('pROC'))
+
+```
+
+
+# Question 1
+
+Download the classification output data set
+
+Answer: Summary of the data set.
+```{r p1}
+
+data <- read.csv("C:/cuny/Fall_2018/DATA-621/Assignment2/classification-output-data.csv")
+
+head(data)
+
+#data <- data[,c(9:11)]
+#head(data)
+#summary(data)
+
+```
+
+# Question 2
+
+The data set has three key columns we will use:
+
+. class:              the actual class for the observation
+
+. scored.class:       the predicted class for the observation (based on a threshold of 0.5)
+
+. scored.probability: the predicted probability of success for the observation 
+ 
+Use the table() function to get the raw confusion matrix for this scored dataset. Make sure you understand the output. In particular, do the rows represent the actual or predicted class? The columns?
+
+```{r p2}
+t <- table(data$scored.class, data$class)
+t
+
+
+```
+
+
+Answer: Rows represents the predicted class.    
+        Columns represents the actual class.
+
+# Question 3 to 8
+
+Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the following of the predictions.
+
+$$ Accuracy = \frac{TP + TN}{TP + FP + TN + FN}$$
+
+
+$$ classification Error Rate = \frac{FP + FN}{TP + FP + TN + FN}$$
+Verify that you get an accuracy and an error rate that sums to one. 
+
+
+$$ Precision = \frac{TP}{TP + FP }$$
+
+$$ Sensitivity = \frac{TP}{TP + FN }$$
+
+$$ Specificity = \frac{TN}{TN + FP }$$
+
+
+$$ F1 Score = \frac{2 * Precision * Sensitity}{Precision + Sensitity }$$
+
+Sensitivity (also called the true positive rate) measures the proportion of actual positives that are correctly identified as such (e.g., the percentage of sick people who are correctly identified as having the condition).
+ 
+Specificity (also called the true negative rate) measures the proportion of actual negatives that are correctly identified as such (e.g., the percentage of healthy people who are correctly identified as not having the condition).
+ 
+The positive and negative predictive values (PPV and NPV respectively) are the proportions of positive and negative results in statistics and diagnostic tests that are true positive and true negative results, respectively.
+
+The PPV and NPV describe the performance of a diagnostic test or other statistical measure. A high result can be interpreted as indicating the accuracy of such a statistic. The PPV and NPV are not intrinsic to the test; they depend also on the prevalence.The PPV can be derived using Bayes' theorem.
+
+Accuracy - Accuracy is the most intuitive performance measure and it is simply a ratio of correctly predicted observation to the total observations. Accuracy is a great measure but only when you have symmetric datasets where values of false positive and false negatives are almost same. Therefore, you have to look at other parameters to evaluate the performance of your model. For our model, we have got 0.806 which means our model is approx. 80% accurate.
+
+Precision - Precision is the ratio of correctly predicted positive observations to the total predicted positive observations.High precision relates to the low false positive rate. We have got 0.798 precision which is pretty good.
+
+F1 score - F1 Score is the weighted average of Precision and Sensitivity. Therefore, this score takes both false positives and false negatives into account. Intuitively it is not as easy to understand as accuracy, but F1 is usually more useful than accuracy, especially if you have an uneven class distribution. Accuracy works best if false positives and false negatives have similar cost. If the cost of false positives and false negatives are very different, it's better to look at both Precision and Sensitivity. In our case, F1 score is 0.871.
+
+```{r p3}
+
+met <- function(t)  {
+tp <- t[1,1] ; fp <-t[1,2]; fn <-t[2,1]; tn <-t[2,2]
+
+accuracy <- (tp + tn) / (tp + fp + tn + fn) 
+err_rate <- (fp + fn) / (tp + fp + tn + fn)
+precision <- tp / (tp + fp)
+sensitivity <- tp/(tp + fn)
+specificity <- tn/(tn + fp)
+f1 <- (2 * precision * sensitivity)/(precision + sensitivity)
+
+df <- data.frame(accuracy = accuracy,
+		 error_rate = err_rate,
+                 precision = precision,
+ 		 sensitivity = sensitivity,
+ 		 specificity = specificity,
+		 f1=f1)
+
+return(df)
+}
+
+results <- met(t)
+results
+```
+
+Answer: 
+
+Sum of accuracy and error rate
+
+```{r p4}
+
+# accuracy + error rate
+tot <- results$accuracy + results$error_rate
+tot
+```
+
+
+
+# Question 9
+
+Before we move on, let's consider a question that was asked: What are the bounds on the F1 score? Show that the F1 score will always be between 0 and 1. 
+(Hint: if 0 < a < 1 and 0 < b < 1 then ab < a )
+
+Answer: 
+
+  F1 is calculated using the precision and sensitivity scores. Since each of those are bounded by 0 and 1, we can be confident that the values when substitued in the formula will be between 0 and 1.
+
+# Question 10 and 11. 
+
+Write a function that generates an ROC curve from a data set with a true classification column (class in our example) and a probability column (scored.probability in our example). Your function should return a list that includes the plot of the ROC curve and a vector that contains the calculated area under the curve (AUC). Note that I recommend using a sequence of thresholds ranging from 0 to 1 at 0.01 intervals. 
+
+Use your created R functions and the provided classification output data set to produce all of the classification metrics discussed above.
+
+
+```{r p5}
+rocauc <- function(class, scores) {
+class <- class[order(scores, decreasing =TRUE)]
+sensitivity <-cumsum(class)/sum(class)
+specificity <-cumsum(!class)/sum(!class)
+
+df <- data.frame(sensitivity,specificity,class)
+dspecificity <- c(diff(specificity),0)
+dsensitivity <- c(diff(sensitivity),0)
+auc <- round(sum(sensitivity * dspecificity) + sum(dsensitivity * dspecificity) / 2, 4)
+
+results <- list(df,auc)
+return(results)
+}
+
+rocaucres <- rocauc(data$class, data$scored.probability)
+
+
+```
+
+
+
+
+```{r p6}
+
+roc <- rocaucres[[1]]
+auc <-  rocaucres[[2]]
+
+ggplot(roc , aes(specificity , sensitivity)) +
+    geom_line(color = 'steelblue') +
+    geom_abline(linetype=2) +
+    annotate("text", x=.5, y =.25, label=paste("AUC:",auc))
+
+```
+  
+ROC curve is used to show in a graphical way the connection/trade-off between sensitivity and specificity for every possible cut-off for a test or a combination of tests. In addition the area under the ROC curve gives an idea about the benefit of using the test(s) in question. 
+
+As the area under an ROC curve is a measure of the usefulness of a test in general, where a greater area means a more useful test, the areas under ROC curves are used to compare the usefulness of tests. 
+
+The closer an ROC curve is to the upper left corner, the more efficient is the test.
+
+# Question 12. 
+
+Investigate the caret package. In particular, consider the functions confusionMatrix, sensitivity, and specificity. Apply the functions to the data set. How do the results compare with your own functions?
+
+```{r p7}
+
+cm <- confusionMatrix(table(data$scored.class, data$class ))
+
+cr <- data.frame(t(cm$byClass))
+cr_Results <- data.frame(accuracy = cm$overall[['Accuracy']],
+			 error_rate = 1 - cm$overall[['Accuracy']],
+			 precision = cr$Precision,
+			 sensitivity = cr$Sensitivity,
+			 specificity = cr$Specificity,
+			 f1 = cr$F1)
+
+resvscr <- rbind(results,cr_Results)
+row.names(resvscr) <- c("Manual","CaretPackage")
+
+resvscr
+```
+
+In comparison of manual calculation and Caret package, the results are same.
+
+# Question 13.
+
+Investigate the pROC package. Use it to generate an ROC curve for the data set. How do the results compare with your own functions? 
+
+
+```{r p8}
+rocpa <- roc(data$class, data$scored.probability)
+
+plot(rocpa, asp =NA, legacy.axes = TRUE, print.auc=TRUE, xlab='Specificity')
+```
+
+ROC curve of the pROC package appears to be the same with that of the calculation created manually.
