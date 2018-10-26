@@ -1,0 +1,595 @@
+---
+title: "621 Assignment3 "
+author: "Raghu"
+date: "Oct 20, 2018"
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    df_print: kable
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+\pagebreak
+
+```{r p0, include=FALSE}
+
+# Loading Packages
+requiredpackages <- c('knitr', 'kableExtra', 'psych', 'ggplot2', 'reshape2', 'corrplot', 'tidyr', 'dplyr', 'plyr', 'MASS', 'caret', 'pscl', 'lmtest', 'pROC', 'ROCR','tibble','leaps','MASS','magrittr')
+for (i in requiredpackages){
+  if(!require(i,character.only=T)) install.packages(i)
+  library(i,character.only=T)
+}
+
+```
+
+
+# Overview:
+
+  In this homework assignment, you will explore, analyze and model a data set containing information on crime for various neighborhoods of a major city. Each record has a response variable indicating whether or not the crime rate is above the median crime rate (1) or not (0). 
+ 
+  Your objective is to build a binary logistic regression model on the training data set to predict whether the neighborhood will be at risk for high crime levels. You will provide classifications and probabilities for the evaluation data set using your binary logistic regression model. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set: 
+ 
+\textbf{Explanatory Variables:}
+
+zn: proportion of residential land zoned for large lots (over 25000 square feet) (predictor variable)
+ 
+indus: proportion of non-retail business acres per suburb (predictor variable)
+
+chas: a dummy var. for whether the suburb borders the Charles River (1) or not (0) (predictor variable)
+
+nox: nitrogen oxides concentration (parts per 10 million) (predictor variable)
+
+rm: average number of rooms per dwelling (predictor variable)
+
+age: proportion of owner-occupied units built prior to 1940 (predictor variable)
+
+dis: weighted mean of distances to five Boston employment centers (predictor variable)
+
+rad: index of accessibility to radial highways (predictor variable)
+
+tax: full-value property-tax rate per $10,000 (predictor variable)
+
+ptratio: pupil-teacher ratio by town (predictor variable)
+
+black: $1000(Bk - 0.63)^2$ where Bk is the proportion of blacks by town (predictor variable)
+
+lstat: lower status of the population (percent) (predictor variable)
+
+medv: median value of owner-occupied homes in $1000s (predictor variable)
+
+target: whether the crime rate is above the median crime rate (1) or not (0) (response variable)
+
+\pagebreak
+
+# 1. DATA EXPLORATION
+ 
+Describe the size and the variables in the crime training data set. Consider that too much detail will cause a manager to lose interest while too little detail will make the manager consider that you aren't doing your job. 
+
+a. Mean / Standard Deviation / Median 
+b. Bar Chart or Box Plot of the data 
+c. Is the data correlated to the target variable (or to other variables?) 
+d. Are any of the variables missing and need to be imputed "fixed"?
+
+\textbf{Data View:}
+
+Lets have a quick view of crime data.
+
+```{r p1}
+# Loading in datasets
+url_train <- 'C:/cuny/Fall_2018/DATA-621/Assignment3/crime-training-data.csv'
+url_test <- 'C:/cuny/Fall_2018/DATA-621/Assignment3/crime-evaluation-data.csv'
+crime_train <- read.csv(url_train, header = TRUE)
+crime_test <- read.csv(url_test, header = TRUE)
+kable(head(crime_train)) #%>% 
+#  kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+\pagebreak
+
+## Basic Stats
+
+There are 466 observations and 14 variables.
+  * 10 variables of type dble.
+  * 4 variables of type int.
+
+
+```{r p1.a1}
+glimpse(crime_train)
+```
+
+
+* Summary Statistics shows none of the variables have missing values
+* The mean of target is below 0.5 which means there are more observations where the crime rate is below the median.
+
+```{r p1.a2}
+# Summary Statistic:
+describe(crime_train) 
+```
+
+\pagebreak
+
+## Data Visualization 
+
+##  BoxPlot Distribution
+
+  Boxplot demonstrating the mean, median and quartiles of the independent variables. 
+
+```{r p1.a3}
+# Data Visualization using BoxPlot Distribution
+crime_melt <- melt(crime_train)
+ggplot(crime_melt, aes(x = factor(variable), y=value)) + geom_boxplot() + facet_wrap(~variable, scale="free") + xlab("") + ylab("Values")
+```
+
+## BoxPlot of all variables
+
+```{r p1.a3.1}
+
+ggplot(crime_melt, aes(x = factor(variable), y=value)) + geom_boxplot() + coord_flip() + xlab("") + ylab("Values")
+```
+
+\pagebreak
+
+The box plots displays that many of the variables have low variances.
+
+Lets look at the log scale of the independent variables.
+
+## BoxPlot with Log Scale
+
+```{r p1.a4}
+
+# Scale Y Log
+ggplot(crime_melt, aes(x = factor(variable), y=value)) + geom_boxplot() + scale_y_log10() + coord_flip() + xlab("Log Transformation of Independent Variables") + ylab("")
+
+```
+
+\pagebreak
+
+## Density Plots 
+
+ Lets look at the Density Plots for skewness. 
+ 
+--rm is the only variable that closely mirrors a normal distribution.
+
+--zn, chas, and dis are heavily skewed right.
+
+--nox, lstat, and medv are are also skewed right.
+
+--indus, rad, tax, and target are multi-modal.
+
+The density plots reveal that most is the data is not normal.
+
+```{r p1.a5}
+ggplot(crime_melt, aes(value)) + geom_density(fill = "skyblue") + facet_wrap(~variable, 
+    scales = "free")
+# Histogram Visualizations
+#ggplot(crime_melt, aes(x = value)) + geom_histogram(bins=50) + #facet_wrap(~variable, scale="free") + xlab("") + ylab("Frequency")
+
+```
+
+\pagebreak
+
+##  Scatterplot 
+
+Interpreting a binomial reseponse variable may not be the most best way to visualize the data using scatterplot.
+
+```{r p1.a6}
+
+# Scatterplot of independent variables to 'target' variable
+meltTarget <- melt(crime_train, id.vars = c("target"))
+ggplot(meltTarget, aes(x=value, y=target)) + geom_point() + facet_wrap(~variable, scale="free")
+
+```
+
+\pagebreak
+
+##  Correlations
+
+   "nox"" has the highest positive correlation and "dis"" has the highest negative correlation. "tax"" and "rad" are correlated to each other. 
+
+```{r p1.a7}
+
+# Correlations andvisualizations
+cormatrix <- cor(crime_train, method="pearson", use="complete.obs")
+#cormatrix
+
+corrplot(cormatrix, method="circle")
+
+# More correlations
+cor_df <- as.data.frame(cormatrix) %>% dplyr::select(target)
+pos_cor <- subset(cor_df, cor_df[,'target'] > .2)
+neg_cor <- subset(cor_df, cor_df[,'target'] < -.2)
+neut_cor <- subset(cor_df, cor_df[,'target'] > -.2 & cor_df[,'target'] < .2)
+
+print("Correlation to Target")
+cor_df
+
+print("Positive Correlative Factors:")
+row.names(pos_cor) 
+
+print("Negative Correlative Factors:")
+row.names(neg_cor) 
+
+print("Neutral Correlative Factors")
+row.names(neut_cor) 
+
+# Looking for very highly correlated, arbitrarily set at > .7 or < -.7
+highly_pos_correlated <- subset(cor_df, cor_df[,'target'] > .7 
+                                & cor_df[,'target'] < 1)
+highly_neg_correlated <- subset(cor_df, cor_df[,'target'] > -.7 & cor_df[,'target'] < -.5)
+
+print("Highly Positive Correlated Variables")
+highly_pos_correlated
+
+print("Highly Negative Correlated Variables")
+highly_neg_correlated
+
+```
+
+\pagebreak
+
+#2. DATA PREPARATION
+ 
+  Describe how you have transformed the data by changing the original variables or creating new variables. If you did transform the data or create new variables, discuss why you did this. Here are some possible transformations. 
+ 
+a. Fix missing values (maybe with a Mean or Median value) 
+
+b. Create flags to suggest if a variable was missing 
+
+c. Transform data by putting it into buckets 
+
+d. Mathematical transforms such as log or square root (or use Box-Cox) 
+
+e. Combine variables (such as ratios or adding or multiplying) to create new variables 
+
+
+\textbf{Transformation:}
+
+  To reduce the effect of skewness on the model, lets do log transformations on all the variables except the variables that are binary(Zn,chas). 
+
+  Due to high correlation between two indepdent variables that is between tax and rad, We can build an interactive term for this when we build our models as they are possibly likely very dependent on each other with one term affecting the other.
+    
+  Lets look at Zn:proportion of residential land zoned for large lots
+    
+```{r p2.b1}
+hist(crime_train$zn,breaks=20, main="Percentage of Land Noted as 'Residential'", xlab="Zoning Size", col = "lightgreen")
+
+hist(log(crime_train$zn), breaks=20, main="Percentage of Logarithmic Land Noted as 'Residential'", xlab="Zoning Size", col = "blue")    
+```
+
+\pagebreak
+
+Let's create a scatterplot with these new variables for the logarithmic transformations.
+
+## ScatterPlot of log transformations
+```{r p2.b2}
+
+# Creating a dataset with the logarithmic variables
+crime_train_log <- cbind(crime_train$target, crime_train$zn, crime_train$chas, log(crime_train[,c(2,4:12)]))
+
+colnames(crime_train_log) <- c('target', 'zn', 'chas', 'log_indus', 'log_nox', 'log_rm', 'log_age', 'log_dis', 'log_rad', 'log_tax', 'log_ptratio', 'log_lstat', 'log_medv')
+
+# Scatterplot of new logarithmic transformations
+ggplot(melt(crime_train_log), aes(x = value)) + geom_histogram(bins=50) + facet_wrap(~variable, scale="free")
+
+
+```
+
+\pagebreak
+
+# 3. BUILD MODELS
+ 
+Using the training data, build at least three different binary logistic regression models, using different variables (or the same variables with different transformations). You may select the variables manually, use an approach such as Forward or Stepwise, use a different approach, or use a combination of techniques. Describe the techniques you used. If you manually selected a variable for inclusion into the model or exclusion into the model, indicate why this was done. 
+ 
+Be sure to explain how you can make inferences from the model, as well as discuss other relevant model output. Discuss the coefficients in the models, do they make sense? Are you keeping the model even though it is counter intuitive? Why? The boss needs to know.
+
+## Leaps Subsetting of Untransformed Data
+
+The Leaps package is an "regression subset selection" tool. The package automatically generates all possible models. The tool is basically used to find the "best" model.
+
+```{r p3.c1}
+
+regDiags <- regsubsets(target ~ ., data = crime_train, method = "exhaustive", 
+    nvmax = NULL, nbest = 1)
+diagSum <- summary(regDiags)
+
+print(diagSum)
+
+```
+
+
+```{r p3.c2}
+
+# determine best fits
+plot(diagSum$cp, xlab = "Number of Variables", ylab = "Cp")
+points(which.min(diagSum$cp), diagSum$cp[which.min(diagSum$cp)], pch = 20, col = "red")
+
+```
+
+
+
+```{r p3.c4}
+
+# cp plot
+par(mfrow = c(1, 2))
+plot(regDiags, scale = "Cp", main = "Cp")
+
+# r^2 splot
+plot(regDiags, scale = "adjr2", main = "Adjusted R^2")
+
+```
+
+
+Based on Cp, a model that includes nox, age, rad, ptratio, and medv would be the best predictor.
+
+Based on Adjusted R^2, a model that includes nox, age, rad, tax, ptratio, black, and medv would be the best predictor.
+
+Both metrics share the nox, age, rad, ptratio, and medv variables.
+
+\pagebreak
+
+## Model 1: All Variables
+
+The glmulti package is an "automated model selection and model averaging" tool. The package automatically generates all possible models "with the specified response and explanatory variables".
+
+All of the variables will be tested to determine the base model they provided. This will allow us to see which variables are significant in our dataset, and allow us to make other models based on that. This model will be based off of the original data - before transformed (log) variables have been added to account for potential issues in the data.
+
+
+"nox", "rad","ptratio" are highly statistically significant and "dis" and "medv" are somewhat significant.  "nox" has high impact on target. tax has minimum impact and also negative. 
+
+Positive coefficients: chas, nox, age, dis, rad, ptratio, lstat, medv
+
+Negative coefficients: zn, indus, rm, tax, black 
+
+lets see how the other models reports on the deviance and AIC for comparison.
+
+```{r p3.c5}
+m1 <- glm(target ~ ., family = binomial(link = "logit"), data = crime_train)
+summary(m1)
+
+```
+
+\pagebreak
+
+## Transformed Data Analysis.
+
+Lets look at the transformed Data. 
+
+```{r p3.c6}
+regDiags2 <- regsubsets(target ~ ., data = crime_train_log, method = "exhaustive", 
+    nvmax = NULL, nbest = 1)
+diagSum2 <- summary(regDiags2)
+print(diagSum2)
+
+```
+
+
+```{r p3.c7}
+# determine best fits
+plot(diagSum2$cp, xlab = "Number of Variables", ylab = "Cp")
+points(which.min(diagSum2$cp), diagSum2$cp[which.min(diagSum2$cp)], pch = 20, 
+    col = "red")
+                        
+```
+
+
+```{r p3.c8}
+# cp plot
+par(mfrow = c(1, 2))
+plot(regDiags2, scale = "Cp", main = "Cp")
+
+# r^2 splot
+plot(regDiags2, scale = "adjr2", main = "Adjusted R^2")
+
+```
+
+CP has reduced to 4 from 5 after transformation.
+
+Both CP and Rsquare indicates "nox", "rm" , age",  "rad" are best predictors.
+
+\pagebreak
+
+## Model 2: Transformed Variables
+
+Model2 is the log transformation of all the variables and the interacetive term is included.
+
+The log variables should help negate the large amount of skew in the data - or help them to become more normalized.
+
+
+```{r p3.c9}
+m2 <- glm(target ~. + log_rad:log_tax, family = binomial(link = "logit"), 
+    data = crime_train_log)
+summary(m2)
+```
+
+\textbf{Analysis:}
+
+nox has the greatest impact on target.
+
+nox, rad are highly statistically significant.
+
+AIC has increased compared to model1.
+
+Null deviance is the same. Residual deviance has increased.
+
+interactive term did not add much value.
+
+So, this model may not be the best choice. let me try stepwise for Model1 and Model2.
+
+
+\pagebreak
+
+## Model 3: (Logarithmic Model) with stepwise.
+
+Let me try both forward and backward elimination stepwise algorithm here.
+
+```{r p3.c10}
+m3 <- glm(target ~. + log_rad:log_tax, family = binomial(link = "logit"), 
+    data = crime_train_log)
+m3_step <- step(m3, direction ="both")
+summary(m3_step)
+```
+
+\textbf{Analysis:}
+
+AIC has decreased compared to model-2 but still above model-1.
+
+No difference on the Null deviance and Residual deviance.
+
+"nox", "rad" are highly significant and "rm", "dis" are less significant.
+
+\pagebreak
+
+## Model 4: (Logarithmic Model) with Principal Components.
+
+want to check how many variables are selecgted in this model.
+
+```{r p3.c11}
+
+m4 <- train(
+  target~., data = crime_train_log, method = "pcr",
+  scale = TRUE,
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+  )
+
+```
+
+### Model summary \newline
+
+```{r p3.c12}
+summary(m4)
+```
+
+
+### Model Results \newline
+
+```{r p3.c13}
+m4$results
+```
+
+### Model Plot \newline
+
+```{r p3.c14}
+# Plot model RMSE vs different values of components
+plot(m4)
+# Print the best tuning parameter ncomp that
+# minimize the cross-validation error, RMSE
+m4$bestTune
+```
+
+\textbf{Analysis:}
+
+This model has selected upto 6 components.
+
+
+\pagebreak
+
+
+# 4. SELECT MODELS
+ 
+  Decide on the criteria for selecting the best binary logistic regression model. Will you select models with slightly worse performance if it makes more sense or is more parsimonious? Discuss why you selected your models.  
+ 
+  For the binary logistic regression model, will you use a metric such as log likelihood, AIC, ROC curve, etc.? Using the training data set, evaluate the binary logistic regression model based on (a) accuracy, (b) classification error rate, (c) precision, (d) sensitivity, (e) specificity, (f) F1 score, (g) AUC, and (h) confusion matrix. Make predictions using the evaluation data set.
+
+\textbf{Analysis:}  
+
+  After looking at the residual deviance scores and AIC scores in the previous section, we'll  evaluate the model1 here.
+
+Let us evalute the Model Number 1 (baseline model).  Next, we will develop a confusion matrix and create our evaluations there.
+
+
+
+```{r p4.d1}
+par(mfrow = c(2, 2))
+
+plot(m1)
+```
+
+```{r p4.d2}
+
+hist(m1$residuals)
+qqnorm(m1$residuals)
+qqline(m1$residuals)
+
+```
+
+
+The histogram of the residuals do not show a normal distribution.
+
+The qqplot shows a fairly linear relationship, except towards the tail end of the residuals.
+
+The residual indicates that there is not constant variance throughout, as there is a noticable pattern around 0.
+
+
+## Test Model1
+
+```{r p4.d3}
+require(dplyr)
+tM <- crime_train %>% 
+       dplyr::select(-target)
+
+test_results <- predict(m1, newdata = tM, type = "response")
+
+df <- bind_cols(crime_train, data.frame(scored_target = test_results))%>% 
+    mutate(scored_target = if_else(scored_target > 0.5, 1, 0))
+    #%>%    print
+head(df,5)
+```
+
+
+## Performance
+
+```{r p4.d4}
+
+cm <- confusionMatrix(as.factor(df$scored_target), as.factor(df$target), positive = "1", 
+    mode = "everything") %>% print
+
+```
+
+
+```{r p4.d5}
+
+curveRoc <- roc(df$target, df$scored_target)
+plot(curveRoc, legacy.axes = T, main = "pROC")
+
+```
+
+\textbf{Analysis:}  
+
+This model has 90% accuracy.
+ Precision is 95%.
+ Negative prediction rate is only 91%.
+ Positive prediction rate is 93.
+ Sensitivity is 91% 
+ Specificity is 93%
+ F1 is 92%
+ AUC is 92%
+
+## Prediction for Test Data
+
+```{r p4.d6}
+require(dplyr)
+test_results <- predict(m1, newdata = crime_test, type = "response")
+
+#bind_cols(crime_test, data.frame(scored_target = test_results)) %>% #mutate(scored_target = if_else(scored_target > 
+#    0.5, 1, 0)) %>% print
+
+dfp <- bind_cols(crime_test, data.frame(scored_target = test_results))%>% 
+    mutate(scored_target = if_else(scored_target > 0.5, 1, 0))%>%
+    print
+
+
+
+```
+
+# Appendix
+
+For full output code visit: 
