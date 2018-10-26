@@ -120,7 +120,7 @@ describe(crime_train)
 
 ##  BoxPlot Distribution
 
-  Boxplot demonstrating the mean, median and quartiles of the independent variables. 
+  Boxplot demonstrating the mean, median and quartiles of the independent variables. rad, tax and black has high variances.
 
 ```{r p1.a3}
 # Data Visualization using BoxPlot Distribution
@@ -592,4 +592,6 @@ dfp <- bind_cols(crime_test, data.frame(scored_target = test_results))%>%
 
 # Appendix
 
-For full output code visit: 
+For full code visit: 
+
+https://github.com/raghu74us/DATA-621/blob/master/Assignment3/621_Assignment3.Rmd
