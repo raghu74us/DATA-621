@@ -1,0 +1,754 @@
+---
+title: "621 Assignment4 "
+author: "Raghu"
+date: "Nov 12, 2018"
+output:
+  pdf_document:
+      highlight: tango
+      toc: true
+      toc_depth: 4
+      number_sections: true
+      df_print: kable
+      
+  html_document: default
+  prettydoc::html_pretty:
+    highlight: github
+    theme: leonids
+    toc: yes
+fontsize: 8pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+
+\pagebreak
+
+```{r p0, include=FALSE}
+
+withCallingHandlers(suppressWarnings(warning("hi")), warning = function(w) {
+    print(w)
+})
+
+
+# Loading Packages
+requiredpackages <- c('knitr', 'kableExtra', 'psych', 'ggplot2', 'reshape2', 'corrplot', 'tidyr', 'dplyr', 'plyr', 'MASS', 'caret', 'pscl', 'lmtest', 'pROC', 'ROCR','tibble','leaps','MASS','magrittr','ggplot2','glmnet','faraway')
+for (i in requiredpackages){
+  if(!require(i,character.only=T)) install.packages(i)
+  library(i,character.only=T)
+}
+
+update_geom_defaults("point", list(size=1.5))
+theme_set(theme_grey(base_size=10))
+
+```
+
+
+# Overview:
+
+In this homework assignment, you will explore, analyze and model a data set containing approximately 8000 records representing a customer at an auto insurance company. Each record has two response variables. The first response variable, TARGET_FLAG, is a 1 or a 0. A "1" means that the person was in a car crash. A zero means that the person was not in a car crash. The second response variable is TARGET_AMT. This value is zero if the person did not crash their car. But if they did crash their car, this number will be a value greater than zero. 
+ 
+Your objective is to build multiple linear regression and binary logistic regression models on the training data to predict the probability that a person will crash their car and also the amount of money it will cost if the person does crash their car. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set: 
+ 
+# Loading Data Set and Cleaning:
+
+Lets see the data structure.
+
+```{r p1}
+url_eval <- 'https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment4/insurance-evaluation-data.csv'
+
+url_train <-  'https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment4/insurance_training_data.csv'
+
+train <- read.csv(url_train, header=TRUE)
+eval <- read.csv(url_eval, header=TRUE)
+
+# Get rid of the index column
+train <- train[,-1]
+#Verify the data structure
+str(train)
+
+```
+
+Lets have a glimpse on the cleaned data set after removing commas, dollar signs and Z_.
+
+```{r p2}
+# cleanup of data (i.e. need to rremove  Z_, $ signs and commas)
+new_df <- train[,names(train) %in% c("INCOME","OLDCLAIM", "HOME_VAL", "BLUEBOOK")]
+new_df <- apply(new_df, 2, function(y) gsub("\\$","",y))
+new_df <- apply(new_df, 2, function(y) gsub(",","",y))
+new_df <- apply(new_df, 2, as.integer)
+
+train <- train[,!names(train) %in% c("INCOME","OLDCLAIM", "HOME_VAL", "BLUEBOOK")]
+train <- cbind(train, new_df)
+
+new_df <- train[,names(train) %in% c("MSTATUS","SEX", "EDUCATION", "JOB", "CAR_TYPE", "URBANICITY")]
+new_df <- apply(new_df, 2, function(y) gsub("z_","",y))
+
+train <- train[,!names(train) %in% c("MSTATUS","SEX", "EDUCATION", "JOB", "CAR_TYPE", "URBANICITY")]
+train <- cbind(train, new_df)
+
+#glimpse of data set
+print(head(train))
+
+```
+
+\pagebreak
+
+# Data Exploration
+
+Based on the below summary statistics, we can see that there are NA's for AGE, YOJ, CAR_AGE, INCOME and HOME_VAL. There are categorical variables like PARENT1, CAR_USE, RED_CAR, REVOKED, MSTATUS, SEX, EDUCATION, JOB, CAR_TYPE and URBANICITY.
+Histograms shows some of the variables are skewed. Lets see if there are any correlations.
+
+```{r p3.1}
+#check the summary statistics
+summary(train)
+```
+
+\textbf {Boxplot}
+
+```{r p3.2}
+# Boxplot
+ggplot(melt(train), aes(x=factor(variable), y=value)) + facet_wrap(~variable, scale="free") + geom_boxplot()
+```
+
+\pagebreak
+
+\textbf {Histogram}
+
+```{r p3.3}
+# Histogram
+ggplot(melt(train), aes(x=value)) + facet_wrap(~variable, scale="free") + geom_histogram(bins=50)
+```
+
+
+
+\textbf {Correlations}:
+
+
+```{r p4}
+
+# Correlation
+num_train <- train[,!names(train) %in% c( "PARENT1","MSTATUS","EDUCATION","JOB","CAR_USE","CAR_TYPE","RED_CAR", "REVOKED","URBANICITY","INCOME","OLDCLAIM","HOME_VAL","BLUEBOOK","SEX")]
+
+#"TARGET_FLAG","TARGET_AMT",
+#transform(num_train, TARGET_FLAG = as.numeric(TARGET_FLAG), 
+#                     TARGET_AMT = as.numeric(TARGET_AMT))
+
+#sapply(num_train, mode)
+
+c_train <- cor(num_train, method="pearson", use="complete.obs")
+c_train
+
+corrplot(c_train, method="circle") 
+```
+There appears to be correlation between AGE, HOMEKIDS and accidents.
+
+\pagebreak
+
+# Factors affecting Insurance claims:
+
+Lets see the factors affecting the claims.
+
+## 1. Age and Gender: 
+
+```{r p5}
+summary(train$AGE)
+
+ggplot(train, aes(x=AGE)) + geom_histogram(binwidth = 1, col="black", fill="blue") + xlab("Age") + ylab("Count") 
+
+ggplot(train, aes(x=AGE, y=TARGET_AMT)) + geom_point(size=1) + xlab("Age") + ylab("Amount Paid by Insurance in Dollars") + theme_grey(base_size=8)
+
+qqnorm(train$AGE)
+qqline(train$AGE)
+
+
+# Correlation between age and claims
+age_accident <- train %>% 
+  dplyr::select(AGE,TARGET_FLAG) %>% 
+  mutate(AGE = cut(AGE, breaks = c(0,30,60,110), include.lowest=TRUE, labels=c("Young", "Middle", "Old")))
+
+age_accident_table <- table(age_accident)
+age_accident_table
+
+print(paste0("Percentage of Young Drivers: 30 and below in a Crash? ", round(age_accident_table[1,2]/(age_accident_table[1,1] + age_accident_table[1,2]),3)))
+
+print(paste0("Percentage of Middle Age Drivers: 30 to 60 in a Crash? ", round(age_accident_table[2,2]/(age_accident_table[2,1] + age_accident_table[2,2]),3)))
+
+print(paste0("Percentage of Older Drivers: 60 and older in a Crash? ", round(age_accident_table[3,2]/(age_accident_table[3,1] + age_accident_table[3,2]),3)))
+
+```
+
+```{r p6}
+
+# R-squared correlation?
+a <- cor(train$AGE, train$TARGET_FLAG, method = c("pearson"), use = "complete.obs")
+b <- cor(train$AGE, train$TARGET_AMT, method = c("pearson"), use = "complete.obs")
+
+print(paste0("Correlation between Age and car crash? ", round(a,3)))
+print(paste0("Correlation between Age and Amount Paid in car crash? ", round(b,3)))
+```
+
+
+
+\textbf{Analysis}:  It appears that young and old drivers are more involved in crash compared to the percentage of middleaged drivers. But the number of middle aged drivers are more and the incidents is high in the middle aged drivers group. There does not appear to be any correlation between age and amount paid.
+
+\pagebreak
+
+Let's take a look at the linear regression model using only age as the predictor variable and TARGET_AMT as the response variable.
+
+```{r p7}
+
+# One variable linear regression with age
+summary(lm(TARGET_AMT ~ AGE, data = train))
+```
+Age seems to be statistically significant but Rsquare is not good.
+
+
+Let's take a look at the logistic regression for Age vs. TARGET_FLAG:
+```{r p8}
+# Logistic regresion with age and TARGET_FLAG
+summary(glm(TARGET_FLAG ~ AGE, family="binomial", data = train))
+
+```
+Age seems to be statistically significant.
+
+Age appears to be normally distributed.
+
+\pagebreak
+
+## 2. Marital Status: 
+
+Percentage of married people involved in crash is less compared to unmarried.
+Looks like married people tend to drive very carefully.
+
+```{r p9}
+
+summary(train$MSTATUS)
+
+ggplot(train, aes(x=MSTATUS, group = TARGET_FLAG)) + 
+          geom_bar(aes(fill = factor(TARGET_FLAG)), stat="count", width=0.3) +
+          ylab("Count") +
+          xlab("Marriage Status")
+
+ggplot(train, aes(x=MSTATUS, y=TARGET_AMT)) + geom_jitter() + xlab("Marriage Status") + ylab("Amount Paid by Insurance in Dollars")
+
+mstatus_table <- train %>% 
+  dplyr::select(MSTATUS, TARGET_FLAG) %>% 
+  table()
+
+mstatus_table
+
+print(paste0("Percentage of Unmarried People Involved in Car Crashes: ", round(mstatus_table[1,2]/(mstatus_table[1,1] + mstatus_table[1,2]),3)))
+
+print(paste0("Percentage of Married People Involved in Car Crashes: ", round(mstatus_table[2,2]/(mstatus_table[2,1] + mstatus_table[2,2]),3)))
+
+```
+\pagebreak
+
+## 3. Place of living(Urban vs Rural): 
+
+Its very common that most accidents occur in Urban areas where its highly crowded.
+Most densely populated neighborhoods are at high risk for accidents and also the insurance rates are high. Also, Urban areas with unemployment rates have lot of uninsured drivers.  
+
+```{r p10}
+
+summary(train$URBANICITY)
+
+living_area <- train %>% 
+  dplyr::select(URBANICITY, TARGET_FLAG) %>% 
+  table()
+
+living_area
+
+print(paste0("Percentage of People Living in Rural Areas Involved in Car Crashes: ", round(living_area[1,2]/(living_area[1,1] + living_area[1,2]),3)))
+
+print(paste0("Percentage of People Living in Urban Areas Involved in Car Crashes: ", round(living_area[2,2]/(living_area[2,1] + living_area[2,2]),3)))
+
+
+ggplot(train, aes(x=URBANICITY, group = TARGET_FLAG)) + 
+          geom_bar(aes(fill = factor(TARGET_FLAG)), stat="count", width=0.3) +
+          ylab("Count") +
+          xlab("Rural Vs Urban")
+
+ggplot(train, aes(x=URBANICITY, y=TARGET_AMT)) + geom_jitter() + xlab("Rural Vs Urban") + ylab("Amount Paid Out by Insurance in Dollars")
+
+```
+
+\pagebreak
+
+## 4. Profession: 
+
+Insurance industry considers the profession to calculate the risk of accident makers. For example, taxi drivers or truck drivers are on the road constantly where as some professionals does not spend much time on the road or they are very careful.
+
+It appears that jobs such as doctor, manager, lawyer, and professional seem to have less percent crashed. Let's categorize the data into two buckets, Professional and NonProfessional.
+
+```{r p11}
+
+levels(train$JOB)
+
+jobs <- train %>% 
+  dplyr::select(JOB, TARGET_FLAG) %>% 
+  table() %>% 
+  as.data.frame.matrix() 
+
+jobs$Percent_Crashed <- apply(jobs, 1, function(y) y[2]/sum(y))
+jobs
+
+prof_df <- train %>% 
+  dplyr::select(JOB, TARGET_AMT, TARGET_FLAG)
+
+prof_df$JOB_CAT <- ifelse(prof_df$JOB == c('Doctor', 'Manager', 'Lawyer', 'Professional'),'Professional','NonProfessional')
+
+
+prof_df %>% 
+  dplyr::select(JOB_CAT, TARGET_FLAG) %>% 
+  table()
+
+
+# Stats for Profession
+professional <- train %>% 
+  filter(JOB == c('Doctor', 'Manager', 'Lawyer', 'Professional')) %>% 
+  dplyr::select(TARGET_FLAG, TARGET_AMT)
+
+summary(professional)
+
+```
+
+Lets get rid of the zeros from TARGET_AMT as that will  heavily skew the TARGET_AMT data.
+
+```{r p11.1}
+
+# Get rid of the zeros from TARGET_AMT as that will very heavily skew the TARGET_AMT data.
+professional %>% dplyr::select(TARGET_AMT) %>% filter(TARGET_AMT > 0) %>% summary()
+
+# Percentage of professionals in car accidents
+print(paste0("There are a total of ", nrow(professional), " professionals in this dataset."))
+
+print(paste0("How many were involved in a car accident? ", sum(professional$TARGET_FLAG)))
+
+print(paste0("Percent Crashed: ", round(sum(professional$TARGET_FLAG)/nrow(professional),3)))
+
+# Visualization
+ggplot(prof_df, aes(x=JOB_CAT, group = TARGET_FLAG)) + geom_bar(aes(fill = factor(TARGET_FLAG)), stat="count", width=0.3) + xlab("Job Category") + ylab("Frequency") 
+
+prof_df %>% filter(JOB_CAT == 'Professional' & TARGET_AMT > 0) %>% dplyr::select(TARGET_AMT) %>% melt() %>% 
+  ggplot(aes(x=value)) + geom_histogram(bins=50) + xlab("Dollar Amount Paid") + ylab("Count")
+
+# Nonprofessional
+Nonprofessional <- train %>% 
+  filter(JOB != c('Doctor', 'Manager', 'Lawyer', 'Professional')) %>% 
+  dplyr::select(TARGET_FLAG, TARGET_AMT)
+
+
+# Get rid of the zeros from TARGET_AMT as that will very heavily skew the TARGET_AMT data.
+Nonprofessional %>% dplyr::select(TARGET_AMT) %>% filter(TARGET_AMT > 0) %>% 
+  summary()
+  
+print(paste0("There are a total of ", nrow(Nonprofessional), " nonprofessionals in this dataset."))
+
+print(paste0("How many were involved in a car accident? ", sum(Nonprofessional$TARGET_FLAG)))
+
+print(paste0("Percent Crashed: ", round(sum(Nonprofessional$TARGET_FLAG)/nrow(Nonprofessional),3)))
+
+# Visualization
+prof_df %>% dplyr::select(JOB_CAT, TARGET_AMT) %>% filter(TARGET_AMT > 0) %>% 
+  ggplot(aes(x=TARGET_AMT, fill=JOB_CAT)) + geom_histogram(bins=50)
+
+```
+
+\pagebreak
+
+## 5. Vehicle Size: 
+Larger cars have high insurance compared to smaller cars. On the other hand, 
+Larger cars are generally safer than smaller cars in an accident. Cars with larger engines relative to body size tend to have higher rates - for instance, insurance for a sports car with a V8 engine costs much more than a small car with a V4 engine.
+
+```{r p12}
+
+levels(train$CAR_TYPE)
+
+car_size <- train %>% dplyr::select(CAR_TYPE, TARGET_FLAG, TARGET_AMT) %>% 
+  mutate(CAR_SIZE = ifelse(CAR_TYPE != 'Sports Car', 'Large', 'Small'))
+
+car_size %>% dplyr::select(CAR_TYPE, TARGET_FLAG) %>% table()
+
+a <- car_size %>% dplyr::select(CAR_SIZE, TARGET_FLAG) %>% table() %>% as.data.frame.matrix()
+
+a$Percent_Crashed <- apply(a, 1, function(y) y[2]/sum(y))
+#a
+```
+
+## 6. Age of the vehicle:
+
+Newer vehicle usually tend to have higher premiums compared to older vehicle. As the vehicle cost depreciates over the years, premiums also drop minimally. cost to replace a newer vehicle involved in accident is expensive compared to older vehicle. 
+
+
+```{r p13}
+
+train %>% dplyr::select(TARGET_FLAG, CAR_AGE) %>%
+  ggplot(aes(x=factor(TARGET_FLAG), y=CAR_AGE, fill=TARGET_FLAG)) + geom_boxplot() + ylab("Age of the Car") + xlab("No accident vs Accident")
+
+train %>% dplyr::select(CAR_AGE, TARGET_AMT, TARGET_FLAG) %>%
+  ggplot(aes(x=CAR_AGE, y=TARGET_AMT, color=factor(TARGET_FLAG))) + geom_jitter()
+  
+```
+\pagebreak
+
+## 7. Driving History:
+
+Prior accidents will lead to higher premiums. In this data set, we have CLM_FREQ and OLDCLAIM fields which indicates how many times accidents happened and how much was claimed. The higher the frequency, the more likely the person will meet with accident in future and submit claim.
+
+```{r p14}
+# Driving History
+ggplot(train, aes(x=OLDCLAIM, y=TARGET_AMT, color=factor(TARGET_FLAG))) + geom_point()
+
+# Correlation for the Driving History
+train %>% dplyr::select(OLDCLAIM,CLM_FREQ, TARGET_AMT) %>% cor()
+```
+
+\pagebreak
+
+# Data Preparation and Model Building
+
+Earlier we noticed that there were significant missing data. Lets see how many are missing overall.
+
+```{r p15}
+
+# Any number of missing data points?
+sum(is.na(train))
+
+rev(sort(colSums(sapply(train, is.na))))
+```
+
+Let's see if we can impute these values. Let's start with CAR_AGE. We will take only complete cases and create a histogram to see how it is distributed.
+
+```{r p16}
+complete_car_age <- train[complete.cases(train$CAR_AGE),]$CAR_AGE
+hist(complete_car_age,col="green",main="Age of Car Histogram",xlab="Age of the Car")
+
+# Creating the mode
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+Mode(complete_car_age)
+train[is.na(train$CAR_AGE),]$CAR_AGE <- Mode(complete_car_age)
+
+```
+
+It is right skewed, with one bin appearing to be the most frequent. It may be best to impute the missing data with the mode value, as opposed to the mean or median value.
+
+
+Now, lets Impute other predictor Variables HOME_VAL, YOJ and INCOME.
+
+```{r p17}
+#Imputing other NA Variables.
+
+train %>% dplyr::select(HOME_VAL, YOJ, INCOME) %>% melt() %>% 
+  ggplot(aes(x=value)) + geom_histogram(bins=50) + facet_wrap(~variable, scale="free")
+```
+
+Looking at the histograms, the best imputation for HOME_VAL, YOJ, and INCOME would be the mode value, median value, and median value respectively. Let's go ahead and impute these values into the dataset.
+
+There are 6 missing points for AGE which will be substitued with median as well.
+
+```{r p18}
+
+train[is.na(train$HOME_VAL),]$HOME_VAL <- Mode(train[complete.cases(train$HOME_VAL),]$HOME_VAL)
+
+train[is.na(train$YOJ),]$YOJ <- median(train[complete.cases(train$YOJ),]$YOJ)
+
+train[is.na(train$INCOME),]$INCOME <- median(train[complete.cases(train$INCOME),]$INCOME)
+
+train[is.na(train$AGE),]$AGE <- median(train[complete.cases(train$AGE),]$AGE)
+
+```
+
+
+Let's start transforming some of our predictor variables using box cox as not all the data points are normally distributed. By performing a BoxCox transformation, It might normalize some of these predictors, which could potentially yield a better model. Box cox transformation can be done only to positive and not-zero values. Since CAR_AGE, YOJ and INCOME have zeros, I will substite that with 1.
+
+```{r p19}
+
+# BoxCox Transformation
+# BoxCoxTrans from caret package only works on positive numeric values. Must take out the categorical variables
+boxcox_df <- train %>% 
+  filter(CAR_AGE >= 0) %>% 
+  mutate(CAR_AGE = CAR_AGE + 1, YOJ = YOJ + 1, INCOME = INCOME + 1) %>% 
+  dplyr::select(TIF, BLUEBOOK, TRAVTIME, AGE, CAR_AGE, YOJ, INCOME)
+
+apply(boxcox_df, 2, BoxCoxTrans)
+
+```
+
+Box cox has suggested transformations and this will be considered for training the model.
+
+\pagebreak
+
+Let's now proceed with building  models for both logistic regression to determine whether or not a crash will occur and a linear regression to determine how much money is paid out if a crash did indeed occur. We will build the models and evaluate them in terms of their efficacy.
+
+## Model1: Binary Logistic Regression Model
+```{r p20}
+
+full_bin_df <- train %>%dplyr::select(-TARGET_AMT)
+bin_glm_1 <- glm(TARGET_FLAG ~ ., family="binomial", full_bin_df)
+
+summary(bin_glm_1)
+
+```
+
+\pagebreak
+
+## Model2: Backwards stepwise approach Logistic Regression Model
+
+In this model, I will take the full model and attempt to shrink the amount of predictor variables needed by using a backwards stepwise approach.
+
+```{r p21}
+bin_glm_2 <- step(bin_glm_1, direction="backward")
+bin_glm_2
+```
+The stepwise model has produced a model that is not better in regards to fit as evidenced by the residual deviance and AIC, but it does contain less coefficients, which may be ultimately a better choice for us.
+
+Variable Importance:
+To assess the relative importance of individual predictors in the model, we can also look at the absolute value of the t-statistic for each model parameter.
+
+
+```{r p22}
+a <- varImp(bin_glm_2) 
+head(a[order(-a$Overall),,drop=FALSE])
+```
+
+it is interesting to note that these are the top six variables that is considered likely the most important. This may not ultimately impact our final model for logistic regression, but it is also interesting to look out for this type of information.
+
+
+
+## Model3: Logistic Regression Model using Transformed data
+
+
+```{r p22.1}
+
+# Logistic Regression Model Number 3
+bin_glm_3 <- glm(TARGET_FLAG ~ KIDSDRIV + AGE + HOMEKIDS + I(YOJ^1.6) + PARENT1 + I(TRAVTIME^0.7) + CAR_USE + I(TIF^0.2) + RED_CAR + CLM_FREQ + REVOKED + MVR_PTS + I(CAR_AGE^0.4) + I(INCOME^0.4) + HOME_VAL + I(BLUEBOOK^0.5) + OLDCLAIM + MSTATUS + SEX + EDUCATION + JOB + CAR_TYPE + URBANICITY,family="binomial",full_bin_df)
+
+summary(bin_glm_3)
+
+
+```
+
+AIC has not improved in this model.
+
+```{r p22.2}
+a <- varImp(bin_glm_3) 
+head(a[order(-a$Overall),,drop=FALSE])
+```
+
+In both model 3 and model 2, URBANCITY seemed to have the highest variable importance.
+
+\pagebreak
+
+## Model4: Linear Regression Model with untransformed variables. 
+
+Lets develop a linear regression model for the amount paid if the person did get into an accident. Given that we are only looking at people who have ultimately crashed, we need to filter out the results for the zero dollar payout (as these are the people who have not crashed). We are interested in creating a model for the amount paid out in the event of a crash.
+
+```{r p23}
+# Creating a dataset for linear regression
+amt_df <- train %>%dplyr:: select(-TARGET_FLAG) %>% filter(TARGET_AMT > 0)
+
+# Creating Linear Regression Model Number 1
+amt_lm_1 <- lm(TARGET_AMT ~ ., data = amt_df)
+summary(amt_lm_1)
+
+# Checking residual plot for model number 1
+par(mfrow=c(2,2))
+plot(amt_lm_1)
+
+```
+
+\textbf{VIF}
+
+```{r p23.1}
+# VIF
+vif(amt_lm_1)
+```
+
+The adjusted R-squared value is quite low here: 0.01289.
+The model does not appear to explain the variation in the response variable quite well.
+
+There appears to be significant outliers in this dataset, and given the skew in this data (as demonstrated in the Q-Q plot), this may be affecting the data quite adversely. Would the response variable benefit from a transformation? Let's try performing a Box Cox transformation to the response variable and see what the results are.
+
+value of VIF is high which suggests to check for multicollinearity.
+
+\pagebreak
+
+## Model5: Linear Regression Model with transformation
+
+Let's try Box Cox transformation to the response variable and see what the results are.
+
+```{r p24}
+# BoxCox For response variable
+BoxCoxTrans(amt_df$TARGET_AMT)
+
+```
+
+With lambda = 0, let's create a logarithmic transformation of the response variable.
+
+```{r p24.1}
+# Linear Regression Model number 2
+l_TARGET_AMT <- log(amt_df$TARGET_AMT)
+amt_df_trans <- cbind(amt_df, l_TARGET_AMT)
+amt_df_trans <- amt_df_trans %>% dplyr::select(-TARGET_AMT)
+
+amt_lm_2 <- lm(l_TARGET_AMT ~ ., data=amt_df_trans)
+summary(amt_lm_2)
+
+par(mfrow=c(2,2))
+plot(amt_lm_2)
+```
+
+\textbf{VIF}
+
+```{r p24.2}
+# VIF
+vif(amt_lm_2)
+
+```
+
+
+The adjusted R-squared is even worse.The model is certainly better, and the distribution does indeed appear to be improved. However, with a poor adjusted R-squared value, it may benefit us to also look at the transformed predictive values as well.
+
+value of VIF is high which suggests to check for multicollinearity.
+
+\textbf {Check for Multicollinearity}
+
+```{r p24.3}
+round(cor(amt_df_trans[,names(amt_df_trans) %in% c("KIDSDRIV", "AGE","HOMEKIDS","YOJ","TRAVTIME","TIF","CLM_FREQ","MVR_PTS","CAR_AGE","INCOME","HOME_VAL","BLUEBOOK","OLDCLAIM")]),2)
+```
+
+\pagebreak
+
+## Model6: Linear Regression Model with transformed variabled and elimination by VIF
+
+Based on VIF and the correlation matrix, we can start to eliminate some variables. In this case, let's remove HOMEKIDS, EDUCATION, and JOB.
+Let's create model with the elimination of these variables and with the addition of the other transformed variables.
+
+```{r p25}
+amt_lm_4 <- lm(l_TARGET_AMT ~ KIDSDRIV + AGE + I(YOJ^1.6) + PARENT1 + I(TRAVTIME^0.7) + CAR_USE + I(TIF^0.2) + RED_CAR + CLM_FREQ + REVOKED + MVR_PTS + I(CAR_AGE^0.4) + I(INCOME^0.4) + HOME_VAL + I(BLUEBOOK^0.5) + OLDCLAIM + MSTATUS + SEX + CAR_TYPE + URBANICITY, data=amt_df_trans)
+summary(amt_lm_4)
+
+par(mfrow=c(2,2))
+plot(amt_lm_4)
+
+```
+
+So far, this model has outperformed the other models with a modest increase in the adjusted R-square to 0.01371.
+\pagebreak
+
+## Model7: Linear Regressions with LEAPS
+
+We will be using the leaps package in this model. For each size of model p, it finds the variables that produces the minimum RSS.
+
+```{r p26}
+# leaps package, finding RSS
+b <- regsubsets(l_TARGET_AMT ~ ., data=amt_df_trans)
+rs <- summary(b)
+
+plot(2:9, rs$adjr2,xlab="No. of Parameters", ylab="Adjusted R-square")
+print(paste0("How many variables that maximizes the adjusted R-squared value? ", which.max(rs$adjr2)))
+
+plot(2:9, rs$cp,xlab="No. of Parameters", ylab="Cp Statistic")
+abline(0,1)
+```
+
+  Looks like according to the model that would satisfy the Cp Statistic and increases the adjusted R-squared would be 8 variables. Which variables should be included?
+
+```{r p26.1}
+# Which variables should be included?
+rs$which[which.max(rs$adjr),]
+```
+
+
+  So this includes the Intercept, CLM_FREQ, MVR_PTS, BLUEBOOK, MSTATUS, EDUCATION, SEX, CAR_AGE. Let's create a Linear Regression Model from just using these variables and the logairthmic response variable of TARGET_AMT.
+
+```{r p27}
+# Linear Regression Model 5
+amt_lm_5 <- lm(l_TARGET_AMT ~ CLM_FREQ + MVR_PTS + BLUEBOOK + MSTATUS + EDUCATION + SEX + CAR_AGE, data=amt_df_trans)
+summary(amt_lm_5)
+
+par(mfrow=c(2,2))
+plot(amt_lm_5)
+```
+
+This Model appears to be further improved from previous model, with an adjusted R-square of 0.01515. 
+
+Based on the above results, let me choose Model2 and Model7 as final Models. 
+We had already evaluated the performance strength on the linear regression models by using adjusted R-square values, so let's focus on evaluating the logistic regression model.
+
+```{r p28}
+
+#  logistic regression analysis
+Train <- createDataPartition(full_bin_df$TARGET_FLAG, p=0.7, list=FALSE)
+training <- full_bin_df[Train, ]
+testing <- full_bin_df[-Train, ]
+
+pred <- round(predict(bin_glm_2, newdata=testing, type="response"), 3)
+pred1 <- ifelse(pred > 0.28, 1, 0)
+
+#Confusion Matrix
+ans <- confusionMatrix(
+       table(factor(pred1), 
+             factor(testing$TARGET_FLAG)),
+                       positive='1')
+ans
+ans$byClass
+
+plot(roc(testing$TARGET_FLAG, pred), main="ROC Curve from pROC Package")
+# Please note that the X axis is in Specificity (as opposed to 1 - Specificity in the above function)
+require(pROC)
+# Area Under the Curve
+pROC::auc(roc(testing$TARGET_FLAG, pred))
+
+```
+
+The accuracy is 75%. I will use this for Prediction.
+
+# Prediction
+
+```{r p29}
+# Cleaning up the testing dataset.
+# Get rid of the index column
+eval <- eval[,-1]
+
+# Data will requiring cleaning (i.e. need to rid of Z_, $ signs, commas, etc.)
+new_df <- eval[,names(eval) %in% c("INCOME","OLDCLAIM", "HOME_VAL", "BLUEBOOK")]
+  
+new_df <- apply(new_df, 2, function(y) gsub("\\$","",y))
+new_df <- apply(new_df, 2, function(y) gsub(",","",y))
+new_df <- apply(new_df, 2, as.integer)
+
+eval <- eval[,!names(eval) %in% c("INCOME","OLDCLAIM", "HOME_VAL", "BLUEBOOK")]
+eval <- cbind(eval, new_df)
+
+new_df <- eval[,names(eval) %in% c("MSTATUS","SEX", "EDUCATION", "JOB", "CAR_TYPE", "URBANICITY")]
+new_df <- apply(new_df, 2, function(y) gsub("z_","",y))
+
+eval <- eval[,!names(eval) %in% c("MSTATUS","SEX", "EDUCATION", "JOB", "CAR_TYPE", "URBANICITY")]
+eval <- cbind(eval, new_df)
+eval <- eval[,-c(2)]
+
+print(head(eval))
+
+# Making the logistic regression predictions
+test_ans <- round(predict(bin_glm_2, newdata=eval[,-1], type="response"), 3)
+test_ans <- ifelse(test_ans > 0.28, 1, 0)
+test_ans
+
+
+
+```
+
+# Appendix
+
+For full code visit: 
+
