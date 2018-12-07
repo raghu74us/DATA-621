@@ -1,0 +1,703 @@
+---
+title: "621 Assignment5 "
+author: "Raghu"
+date: "Nov 28, 2018"
+output:
+  pdf_document:
+      highlight: tango
+      toc: true
+      toc_depth: 4
+      number_sections: true
+      df_print: kable
+      
+  html_document: default
+  prettydoc::html_pretty:
+    highlight: github
+    theme: leonids
+    toc: yes
+fontsize: 8pt
+geometry: margin=1in
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(warn=-1)
+```
+
+
+
+\pagebreak
+
+```{r p0, include=FALSE}
+
+withCallingHandlers(suppressWarnings(warning("hi")), warning = function(w) {
+    print(w)
+})
+
+
+# Loading Packages
+requiredpackages <- c('knitr','stringr', 'kableExtra', 'psych', 'ggplot2', 'reshape2', 'corrplot', 'tidyr', 'dplyr', 'plyr', 'MASS', 'caret', 'pscl', 'lmtest', 'pROC', 'ROCR','tibble','leaps','MASS','magrittr','ggplot2','ggthemes','glmnet','faraway','missForest','mice','lmvar')
+for (i in requiredpackages){
+  if(!require(i,character.only=T)) install.packages(i)
+  library(i,character.only=T)
+}
+
+update_geom_defaults("point", list(size=1.5))
+theme_set(theme_grey(base_size=10))
+
+```
+
+
+# Overview:
+
+In this homework assignment, you will explore, analyze and model a data set containing information on approximately 12,000 commercially available wines. The variables are mostly related to the chemical properties of the wine being sold. The response variable is the number of sample cases of wine that were purchased by wine distribution companies after sampling a wine. These cases would be used to provide tasting samples to restaurants and wine stores around the United States. The more sample cases purchased, the more likely is a wine to be sold at a high end restaurant. A large wine manufacturer is studying the data in order to predict the number of wine cases ordered based upon the wine characteristics. If the wine manufacturer can predict the number of cases, then that manufacturer will be able to adjust their wine offering to maximize sales. 
+ 
+Your objective is to build a count regression model to predict the number of cases of wine that will be sold given certain properties of the wine. HINT: Sometimes, the fact that a variable is missing is actually predictive of the target. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set: 
+
+# Data Exploration
+
+```{r p1}
+
+# import data
+train_data <- 
+  read.csv("https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment5/wine-training-data.csv") %>% 
+  mutate(STARS = ifelse(is.na(STARS), 0, STARS)) %>% 
+  dplyr::select(-1)
+
+
+eval_data <- 
+  read.csv("https://raw.githubusercontent.com/raghu74us/DATA-621/master/Assignment5/wine-evaluation-data.csv") %>% 
+  mutate(STARS = ifelse(is.na(STARS), 0, STARS)) %>% 
+  dplyr::select(-1)
+
+```
+
+Data set contains 15 numerical variables and 12,795 observations.
+
+```{r p2}
+str(train_data)
+```
+\pagebreak
+
+## Data Dictionary
+
+Based on the descriptions, we would expect higher LabelAppeal and STARS vlues correspond with more number of cases purchased. The below variables could be correlated.
+
+-AcidIndex, CitricAcid, FixedAcidity & VolatileAcidity
+
+-FreeSulfurDioxide & TotalSulfurDioxide
+
+-FreeSulfurDioxide, Sulphates &  TotalSulfurDioxide
+
+## Summary Statistics
+
+Based on the statistics below, there are missing values, variables have negative values. AcidIndex has more kurtosis than a normal distribution.
+Along with AcidIndex, LabelAppeal & STARS, the response variable TARGET is discrete.
+
+```{r p3}
+summary_metrics <- function(df){
+  ###Creates summary metrics table
+  metrics_only <- df[, sapply(df, is.numeric)]
+   
+  df_metrics <- psych::describe(metrics_only, quant = c(.25,.75))
+  df_metrics$unique_values = rapply(metrics_only, function(x) length(unique(x)))
+  df_metrics <- 
+    dplyr::select(df_metrics, n, unique_val=unique_values, min, Q.1st = Q0.25, median, mean, Q.3rd = Q0.75, 
+    max, range, sd, kurtosis
+  )
+  return(df_metrics)
+}
+
+metrics_df <- summary_metrics(train_data)
+
+##datatable(round(metrics_df, 2), options = list(searching = F, paging = F))
+kable(metrics_df, digits = 1, format.args = list(big.mark = ',', scientific = F, drop0trailing = T))
+
+```
+
+\pagebreak
+
+## Visualization
+
+
+
+### Boxplots
+
+The box plots contain the TARGET distributions for each of the discrete variable values. As we expected, higher values of LabelAppeal and STARS are associated with more wine being purchased. Additionally, smaller AcidIndex values appear to be associated with more wine purchases.
+
+```{r p5}
+####Side-by-Side Boxplots
+boxplot_data <- 
+  train_data %>% 
+  dplyr::select(rownames(metrics_df)[metrics_df$unique_val < 15]) %>% 
+  reshape2::melt(id.vars = "TARGET")
+
+
+### Side-by-Side Boxplots
+ggplot(data = boxplot_data, aes(x = factor(value), y = TARGET)) +
+  geom_boxplot() +
+  facet_wrap( ~ variable, scales = "free") +
+  coord_flip() +
+  ggthemes::theme_fivethirtyeight()
+
+```
+
+### Histogram
+
+The distributions of the continuous predictor variables have smaller tails and great peaks.
+
+```{r p6}
+
+# Histogram
+ggplot(melt(train_data), aes(x=value)) + facet_wrap(~variable, scale="free") + geom_histogram(bins=50)
+
+```
+
+\pagebreak
+
+### Correlations
+
+There are very few predictor variables are correlated positively. STARS and LabelAppeal have moderate positive correlations with TARGET, and AcidIndex has a slight negative correlation. 
+
+```{r p7}
+
+c_train <- cor(train_data, method="pearson", use="complete.obs")
+
+corrplot(c_train, method="circle") 
+
+
+```
+
+
+
+\pagebreak
+
+### Missing Values
+
+In the plots and table below, we can see that 7 variables are missing values and that only 70% of the observations are complete. Since most of the predictors are not correlated with each other, it may be difficult to accurately impute the missing values.
+
+```{r p8}
+
+## Missing Values
+options(scipen = 999)
+missing_plot <- VIM::aggr(train_data,  
+                      numbers = T, 
+                      sortVars = T,
+                      col = c("lightgreen", "darkred", "orange"),
+                      labels=str_sub(names(train_data), 1, 8), 
+                      ylab=c("Missing Value Counts"
+                             , "Pattern"))
+
+
+missing_plot$missings %>% 
+  mutate(
+    pct_missing = Count / nrow(train_data)
+    ) %>% 
+  arrange(-pct_missing) %>% 
+  filter(pct_missing > 0) %>% 
+  kable(digits = 3, row.names = T, caption = "Variables Missing Values")  
+options(scipen=0, digits=7)
+
+```
+
+
+\pagebreak
+
+
+# DATA PREPARATION
+
+## Variable Transformations
+
+Based on summary statistics, following 9 varibles have  negative values, and the table below shows that 8 variables contain more than 10% negative values. This many invalid variable values certainly raises concerns about the study's quality of the data collection and measurement.
+
+```{r p9}
+vars_neg_values <- 
+  dplyr::select(train_data, 
+              intersect(rownames(metrics_df)[metrics_df$unique_val > 15],
+              rownames(metrics_df)[metrics_df$min < 0])
+              )
+
+neg_proportions <- t(apply(vars_neg_values, 2, function(x) prop.table(table(x < 0))))
+
+data.frame(
+  Var = rownames(neg_proportions),
+  is_negative = neg_proportions[, 2]
+) %>% arrange(-is_negative) %>% 
+  kable(digits = 2)
+
+```
+
+In the side-by-side boxplots below, we see that if we were to take the absolute value of the negative numbers, the distributions of the transformed negative values are mostly similar to the positive value distributions. The 2 variables with dissimilar distributions FixedAcidity and Alcohol have the fewest negative values. Consequently, we will take the absolute values of these variables.
+
+
+```{r p10}
+vars_neg_values_melted <- 
+  vars_neg_values %>% 
+  reshape::melt() %>% 
+  na.omit() %>% 
+  mutate(is_negative = as.factor(value < 0),  #relevel(, "1")
+         abs_value = abs(value))
+
+ggplot(data = vars_neg_values_melted, aes(x = variable, y = abs_value)) + 
+  geom_boxplot(aes(fill = is_negative)) + 
+  facet_wrap( ~ variable, scales = "free")
+
+train_transformed <- 
+  train_data %>% 
+  mutate(
+    FixedAcidity = abs(FixedAcidity), 
+    VolatileAcidity = abs(VolatileAcidity), 
+    CitricAcid = abs(CitricAcid),
+    ResidualSugar = abs(ResidualSugar),
+    Chlorides = abs(Chlorides),
+    FreeSulfurDioxide = abs(FreeSulfurDioxide),
+    TotalSulfurDioxide = abs(TotalSulfurDioxide),
+    Sulphates = abs(Sulphates),
+    Alcohol = abs(Alcohol))
+
+
+eval_transformed <- 
+  eval_data %>% 
+  mutate(
+    FixedAcidity = abs(FixedAcidity), 
+    VolatileAcidity = abs(VolatileAcidity), 
+    CitricAcid = abs(CitricAcid),
+    ResidualSugar = abs(ResidualSugar),
+    Chlorides = abs(Chlorides),
+    FreeSulfurDioxide = abs(FreeSulfurDioxide),
+    TotalSulfurDioxide = abs(TotalSulfurDioxide),
+    Sulphates = abs(Sulphates),
+    Alcohol = abs(Alcohol))
+
+```
+
+
+
+```{r p11}
+memory.limit(size = 16000)
+## Imputing the Missing Values
+if (!exists("imputed_train")){
+  imputed_train <- mice(train_transformed,m=5, printFlag=FALSE, maxit = 5, seed=2525)
+  imputed_eval <- mice(eval_transformed,m=5, printFlag=FALSE, maxit = 5, seed=2525)
+}
+```
+\pagebreak
+
+### Imputing the Missing Values
+
+The mice() function takes care of the imputing process.m=5 refers to the number of imputed datasets. Five is the default value. meth='pmm' refers to the imputation method. The missing values have been replaced with the imputed values in the first of the five datasets. 
+
+```{r p12}
+
+#impute_results
+impute_df <- summary(imputed_train)
+#kable(impute_df, digits = 2) 
+#impt<-imputed_train$data
+#fit.imtr = with( data=impt, exp = lm(TARGET ~ FixedAcidity + VolatileAcidity + CitricAcid + Density + LabelAppeal + AcidIndex + STARS))
+
+completedtrain <- complete(imputed_train,1)
+```
+
+\pagebreak
+
+### Density Plot
+
+The density of the imputed data for each imputed dataset is showed in magenta while the density of the observed data is showed in blue.
+
+```{r p13}
+
+densityplot(imputed_train)
+
+```
+
+\pagebreak
+
+# BUILD MODELS
+
+Using the training data set, build at least two different poisson regression models, at least two different negative binomial regression models, and at least two multiple linear regression models, using different variables
+
+
+## Linear Models
+
+### Backward Elimination 
+
+
+
+For our first model, let's use all variables in our imputed data set with a backward elimination process that removes the predictor with the highest p-value until all of the remaining p-values are statistically significant at a .05 level. `LabelAppeal`, has the most practical significance in the model. With the other variables held constant, for every 1 point increase in the expert wine rating, we would expect an increase of 9.8 wine cases purchased.
+
+```{r bkwd_elim_lmod}
+
+train_imputed <- completedtrain
+
+backward_elimination <- function(lmod){
+  #performs backward elimination model selection 
+  #removes variables until all remaining ones are stat-sig
+  removed_vars <- c()
+  removed_pvalues <- c()
+
+  #handles category dummy variables
+  cat_levels <- unlist(lmod$xlevels)
+  cat_vars <- str_sub(names(cat_levels), 1, nchar(names(cat_levels)) - 1)
+  cat_var_df <- data.frame(cat_vars,
+                           dummy_vars = str_c(cat_vars, cat_levels),
+                           stringsAsFactors = F)
+  # checks for p-values > .05 execpt for the intercept
+  while (max(summary(lmod)$coefficients[2:length(summary(lmod)$coefficients[, 4]), 4]) > .05){  
+
+    # find insignificant pvalue
+    pvalues <- summary(lmod)$coefficients[2:length(summary(lmod)$coefficients[, 4]), 4]
+    max_pvalue <- max(pvalues)
+    remove <- names(which.max(pvalues))
+    #if categorical dummy variable, remove the variable
+    dummy_var <- dplyr::filter(cat_var_df, dummy_vars == remove)
+    remove <- ifelse(nrow(dummy_var) > 0, dummy_var[, 1], remove)
+    #record the removed variables
+    removed_vars <- c(removed_vars, remove)
+    removed_pvalues <- c(removed_pvalues, max_pvalue)   
+    # update model
+    lmod <- update(lmod, as.formula(paste0(".~.-`", remove, "`"))) 
+  }
+  print(kable(data.frame(removed_vars, removed_pvalues), digits = 3))
+  return(lmod)
+}
+
+all_vars_lmod <- lm(TARGET ~ ., x = T, y = T, data = train_imputed)
+
+bkwd_elim_lmod <- backward_elimination(all_vars_lmod)          
+
+
+
+```
+
+\pagebreak
+
+```{r p14}
+
+summary(bkwd_elim_lmod)
+
+par(mfrow=c(2,2))
+plot(bkwd_elim_lmod)
+
+```
+
+
+```{r p14.1}
+
+PRESS <- function(linear.model) {  #' calculate the predictive residuals
+  pr <- residuals(linear.model)/(1 - lm.influence(linear.model)$hat)
+  #' calculate the PRESS
+  PRESS <- sum(pr^2)
+  return(PRESS)
+}
+
+pred_r_squared <- function(linear.model) {
+  #' Use anova() to get the sum of squares for the linear model
+  lm.anova <- anova(linear.model)
+  #' Calculate the total sum of squares
+  tss <- sum(lm.anova$'Sum Sq')
+  # Calculate the predictive R^2
+  pred.r.squared <- 1 - PRESS(linear.model)/(tss)
+  return(pred.r.squared)
+}
+
+
+
+lm_evaluation <- function(lmod) {
+    lm_summary <- summary(lmod)
+    f <- as.numeric(lm_summary$fstatistic)
+    df_summary <- 
+      data.frame(
+        model_name = deparse(substitute(lmod)), 
+        n_vars = ncol(lmod$model) - 1,
+        numdf = f[2],
+        fstat = f[1],
+        p.value = formatC(pf(f[1], f[2], f[3], lower.tail = F), format = "e", digits = 2),
+        adj.r.squared = lm_summary$adj.r.squared,
+        pre.r.squared = pred_r_squared(lmod),
+        CV_RMSE = lmvar::cv.lm(lmod, k = 100)$MSE_sqrt$mean
+        )
+    return(df_summary)
+}
+
+
+lm_diagnotics <- function(lmod){
+  diag_df <- data.frame(
+    DW.test = car::durbinWatsonTest(lmod)$p,
+    NCV.test = formatC(car::ncvTest(lmod)$p, format = "e", digits = 2),
+    AD.test = formatC(nortest::ad.test(lmod$residuals)$p.value, format = "e", digits = 2),
+    VIF_gt_4 = sum(car::vif(lmod) > 4)
+  )
+  return(diag_df)
+}
+
+
+#evaluate performance & diagnostics
+kable(lm_results <- lm_evaluation(bkwd_elim_lmod), digits = 3, caption = "Model Summary Statistics")
+
+kable(lm_results_diagnostics <- lm_diagnotics(bkwd_elim_lmod), digits = 3, caption = "Model Diagnostic Statistics")
+
+
+```
+
+\pagebreak
+
+
+### BIC Selection
+
+
+Now let's use the original variables of the imputed data set with a BIC selection. Due to its high predictor penalty, this process removed 2 more variables than the backward elimination process, leaving the model with 6 statistically significant variables.
+
+
+```{r p15}
+n <- nrow(all_vars_lmod$model)
+
+BIC_lmod <- step(all_vars_lmod, k = log(n))
+removed_variables <- function(larger_mod, smaller_mod){
+  #compares variables of 2 models
+  #returns the variables not in the small model
+  removed <- names(coef(larger_mod))[!names(coef(larger_mod)) %in%
+   names(coef(smaller_mod))]
+    print(paste("removed variable(s):", length(removed)))
+    print(removed)
+
+}
+removed_variables(bkwd_elim_lmod, BIC_lmod)
+summary(BIC_lmod)
+summary(fitted(bkwd_elim_lmod))
+
+```
+
+The BIC model's diagnostic plots closely resemble the plots from the backward elimination mode. While the Residuals-vs-Fitted plot displays what appears to be constant variance given the discrete response variable, the standardized-residual plot reveals some nonconstant variance along the fitted residuals. The Normal Q-Q plot shows that the standardized residuals are close to normality. The Leverage plot shows that we do not have any influential points.
+
+
+```{r plotlm2, fig.width = 10, fig.height = 10}
+
+par(mfrow=c(2,2))
+plot(BIC_lmod)
+
+```
+
+
+```{r p16}
+
+#evaluate performance & diagnostics
+model_eval <- lm_evaluation(BIC_lmod)
+model_diag <- lm_diagnotics(BIC_lmod) 
+kable(lm_results <- rbind(lm_results, model_eval), digits = 3, caption = "Model Summary Statistics")
+
+```
+
+
+```{r p17}
+kable(lm_results_diagnostics <- rbind(lm_results_diagnostics, model_diag), digits = 3, caption = "Model Diagnostic Statistics")
+```
+
+\pagebreak
+
+
+## Poission Regression
+
+### Regular Poisson Model with BIC Selection
+
+Let's use Poisson regression with the BIC variable selection process. This process removed 9 variables creating the most parsimonious model so far with 5 statistically significant features.
+
+```{r p18}
+
+## Poission Regression
+pois_mod <- glm(TARGET ~ ., family = "poisson", data = train_imputed)
+### Regular Poisson Model with BIC Selection
+BIC_pois_mod <- step(pois_mod, k = log(n))
+
+removed_variables(pois_mod, BIC_pois_mod)
+
+```
+
+
+Let's exponentiate the model's coefficients in order to make them interpretable in terms of wine cases. With the other variables held constant, for every 1 point increase in the expert wine rating STARS, we would expect on average an increase of 1.37 wine cases to be purchased.
+
+```{r p19}
+summary(BIC_pois_mod)
+exp(cbind(coef(BIC_pois_mod), confint(BIC_pois_mod)))
+```
+
+With a p-value near zero, this 5-variable model is statistically significant when compared to the null hypothesis, but it only explains 35% of the deviance. The p-value for the goodness-of-fit chi-squared test is near zero, which indicates that the model's deviance is not small enough for a good fit. At .85, the model has underdispersion, which indicates that the data exhibit less variation than the Poisson distribution expects. None of the variables are exhibiting collinearity with a variance inflation factor greater than 4 (VIF_gt_4).
+
+```{r p20}
+
+glm_performance <- function(model) {
+  ### Summarizes the model's key statistics
+  df_summary <- data.frame(
+    model_name = deparse(substitute(model)),
+    n_vars = length(coef(model)) - 1,
+    pvalue = formatC(with(model, pchisq(null.deviance - deviance, df.null -  df.residual, lower = F)), format = "e", digits = 2),
+    devianceExpl = with(model, 1 - deviance/null.deviance),
+    GoFtest = formatC(with(model, pchisq(deviance, df.residual, lower.tail=FALSE)), format = "e", digits = 2),
+    dispersion_parameter = sum(residuals(model,type="pearson")^2)/model$df.res,
+    VIF_gt_4 = sum(car::vif(model) > 4),
+    CV_RMSE = sqrt(boot::cv.glm(model$model, model, K = 100)$delta[1])
+  )
+  return(df_summary)
+}
+
+glmod <- glm_performance(BIC_pois_mod)
+kable(all_glmods <- glmod, digits = 3)
+```
+
+\pagebreak
+
+### Quasi-Poisson Model with BIC Selection
+
+Since the previous Poisson model was underdispersed, let's try applying the quasi-Poisson generalized linear model to those 5 variables.
+
+```{r p21}
+
+### Quasi-Poisson Model with BIC Selection
+quasi_pois_mod <- glm(BIC_pois_mod$formula, family = "quasipoisson", data = train_imputed)
+options(scipen = 9)
+summary(quasi_pois_mod)
+glmod <- glm_performance(quasi_pois_mod)
+kable(all_glmods <- rbind(all_glmods, glmod), digits = 3)
+```
+
+In fact, the Poisson and quasi-Poisson model stats are exactly the same.
+
+\pagebreak
+
+## Negative Binomial Regression
+
+### BIC selection with Dispersion Parameter of 1
+
+Now let's try negative binomial regression, which can arise out of a generalized Poisson regression. We will start with a disperson parameter of 1, which corresponds to the geometric distribution and use imputed original variables with a BIC selection process. The result of this process is a 7-feature model with the addition of the Sulphates and pH variables.
+
+```{r p22}
+
+## Negative Binomial Regression
+### BIC selection with Dispersion Parameter = 1
+nb1_mod_all_vars <- glm(TARGET ~ ., family = negative.binomial(1), data = train_imputed)
+
+BIC_nb_k1_mod <- step(nb1_mod_all_vars, k = log(n))
+summary(BIC_nb_k1_mod)
+
+```
+
+With a p-value near zero, this 7-variable model is statistically significant when compared to the null hypothesis, but it only explains 25% of the deviance. The p-value for the goodness-of-fit chi-squared test appears to be near 1, which indicates a good fit. None of the variables are exhibiting collinearity with a variance inflation factor greater than 4 (VIF_gt_4).
+
+```{r p23}
+glmod <- glm_performance(BIC_nb_k1_mod)
+kable(all_glmods <- rbind(all_glmods, glmod), digits = 3)
+
+```
+
+\pagebreak
+
+### BIC selection with Varying Dispersion Parameter
+
+Finally, let's run a BIC selection process on a negative binomial model where the dispersion parameter is allowed to vary. It will be estimated using the maximum likelihood. The result of this process is the 5-variable model below.
+
+
+```{r p24}
+## BIC selection with Floating Dispersion Parameter
+nb_mod_all_vars <- MASS::glm.nb(TARGET ~ ., data = train_imputed)
+BIC_nb_mod <- step(nb_mod_all_vars, k = log(n))
+                                  
+#BIC_nb_mod <- step(nb_mod_all_vars, k = log(n), steps=2, TRACE=FALSE)
+#summary(BIC_nb_mod$coefficients)
+
+```
+
+With a p-value near zero, this 5-variable model is statistically significant when compared to the null hypothesis, but it only explains 35% of the deviance. The p-value for the goodness-of-fit chi-squared test is near zero, which indicates that the model's deviance is not small enough for a good fit. None of the variables are exhibiting collinearity with a variance inflation factor greater than 4 (VIF_gt_4).
+
+
+```{r p25, include=FALSE}
+options(warn=-1)
+glmod <- glm_performance(BIC_nb_mod)
+
+```
+
+```{r p25.1}
+kable(all_glmods <- rbind(all_glmods, glmod), digits = 3)
+```
+
+
+\pagebreak
+
+# SELECT MODELS
+
+## Coefficient Comparison
+
+Let's take a look at the coefficients from our models. In the table below, we see that the intercepts are all approximately 3 to 4 wines cases. The linear coefficients largely align, and the generalized linear coefficients largely align. Among the linear models, there are small differences, but not practical differences. Among the generalized linear models, the Poisson (BIC_pois_mod), quasi-Poisson (quasi_pois_mod) & negative binomial with the varying dispersion parameter (BIC_nb_mod) are nearly identical. This exhibits how closely the Poisson and negative binomial distributions can approximate each other. Only the negative binomial model with a dispersion parameter of 1 has some small differences. Interestingly, while the variables VolatileAcidity & AcidIndex had negative effects on the response variable for the linear models, they had positive ones in the generalized linear models.
+
+```{r p26, INCLUDE=FALSE}
+options(warn=-1)
+options(knitr.kable.NA = '')
+compare_coefficients <- data.frame(var = rev(names(coef(all_vars_lmod))))
+all_models <- c(as.character(lm_results$model_name), as.character(all_glmods$model_name))
+
+for (i in 1:length(all_models)){
+  model <- get(all_models[i])
+  model_name <- all_models[i]
+  is_lm_obj <- rep(class(model)[1] == "lm", length(coef(model)))
+  df <- data.frame(var = as.character(names(coef(model))))
+  df[, model_name] <- ifelse(is_lm_obj, coef(model), exp(coef(model)))
+  compare_coefficients <- left_join(compare_coefficients, df)
+}
+ind <- apply(compare_coefficients[ , 2:7], 1, function(x) all(is.na(x)))
+
+compare_coefficients_df <- 
+  compare_coefficients[!ind, ] %>% 
+  arrange(-bkwd_elim_lmod)
+options(warn=-1)
+```
+
+
+```{r p26.1}
+kable(compare_coefficients_df, digits = 6)
+
+```
+
+\pagebreak
+
+## Best Model
+
+
+Based on the 2 tables("The number of negative fitted values in the linear models" and "Final Model Comparison"), we  can see that the 2 linear models actually have the smallest cross-validated root mean square error, these models also have a small number of negative fitted values, which demonstrates the limited application of linear models to count response variables. Among the remaining generalized linear models, while the negative binomial model with a dispersion parameter of 1 (BIC_nb_k1_mod) has the largest cross-validated root mean square error, the difference between 1.406 and 1.486 may not be practically significant. Additionally, it is the only model that had a good fit under the chi-squared distribution. Consequently, it is the best model.
+
+
+
+```{r p27, include=FALSE}
+
+negative_fits <- data.frame(
+  bkwd_elim_lmod = sum(fitted(bkwd_elim_lmod) < 0),
+  BIC_lmod = sum(fitted(BIC_lmod) < 0)
+)
+```
+
+
+
+```{r p27.1}
+kable(negative_fits, caption = "The number of negative fitted values in the linear models")
+```
+
+
+```{r p28, include = FALSE}
+
+final_summary <- rbind(lm_results[, c("model_name", "n_vars", "CV_RMSE")],
+                       all_glmods[, c("model_name", "n_vars", "CV_RMSE")]) 
+```
+
+
+```{r p28.1}
+kable(final_summary, digits = 3, caption = "Final Model Comparison")
+```
+
+
+
+# Evaluation Data Set Predictions
+
+We used the negative binomial model with a dispersion parameter of 1 and made predictions on the evaluation data set. The following is statistical summary of the predicted responses.
+
+```{r p29}
+
+summary(predict(BIC_nb_k1_mod, newdata = imputed_eval$ximp, type = "response"))
+
+```
